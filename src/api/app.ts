@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto';
 import type { Database } from '../db/pool.js';
 import type { Logger } from '../infrastructure/logger.js';
 import { AppError } from './errors.js';
+import type { AuthService } from '../auth/types.js';
 
 export interface AppDependencies {
   database: Pick<Database, 'healthCheck'>;
   logger: Logger;
+  auth?: AuthService;
   requestId?: () => string;
 }
 
@@ -15,6 +17,32 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown, r
   response.setHeader('content-type', 'application/json; charset=utf-8');
   response.setHeader('x-request-id', requestId);
   response.end(JSON.stringify(body));
+}
+
+async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  let body = '';
+  for await (const chunk of request) {
+    body += chunk.toString();
+    if (body.length > 16_384) throw new AppError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
+  }
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('object required');
+    return parsed as Record<string, unknown>;
+  } catch {
+    throw new AppError(400, 'INVALID_JSON', 'Request body must be a JSON object');
+  }
+}
+
+function requiredAuth(auth: AuthService | undefined): AuthService {
+  if (!auth) throw new AppError(503, 'AUTH_UNAVAILABLE', 'Authentication is unavailable');
+  return auth;
+}
+
+function bearerToken(request: IncomingMessage): string {
+  const header = request.headers.authorization;
+  if (!header?.startsWith('Bearer ')) throw new AppError(401, 'UNAUTHORIZED', 'A bearer token is required');
+  return header.slice(7).trim();
 }
 
 export function createApp(dependencies: AppDependencies) {
@@ -26,18 +54,44 @@ export function createApp(dependencies: AppDependencies) {
     response.setHeader('referrer-policy', 'no-referrer');
 
     try {
-      if (request.method !== 'GET') {
-        throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only GET requests are supported by this foundation API');
-      }
-
       if (request.url === '/health') {
+        if (request.method !== 'GET') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only GET requests are supported');
         sendJson(response, 200, { status: 'ok' }, requestId);
         return;
       }
 
       if (request.url === '/ready') {
+        if (request.method !== 'GET') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only GET requests are supported');
         await dependencies.database.healthCheck();
         sendJson(response, 200, { status: 'ready' }, requestId);
+        return;
+      }
+
+      if (request.url === '/auth/challenge') {
+        if (request.method !== 'POST') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only POST requests are supported');
+        const body = await readJson(request);
+        const result = await requiredAuth(dependencies.auth).createChallenge(body.walletAddress as string);
+        sendJson(response, 201, result, requestId);
+        return;
+      }
+
+      if (request.url === '/auth/verify') {
+        if (request.method !== 'POST') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only POST requests are supported');
+        const body = await readJson(request);
+        const result = await requiredAuth(dependencies.auth).verifyChallenge({
+          challengeId: body.challengeId as string,
+          walletAddress: body.walletAddress as string,
+          signature: body.signature as string
+        });
+        sendJson(response, 200, result, requestId);
+        return;
+      }
+
+      if (request.url === '/auth/me') {
+        if (request.method !== 'GET') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only GET requests are supported');
+        const user = await requiredAuth(dependencies.auth).authenticate(bearerToken(request));
+        if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication is required');
+        sendJson(response, 200, user, requestId);
         return;
       }
 

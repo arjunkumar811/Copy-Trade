@@ -5,6 +5,8 @@ export interface AppConfig {
   databaseUrl: string;
   databasePoolSize: number;
   sessionSecret: string;
+  authChallengeTtlSeconds: number;
+  sessionTtlSeconds: number;
 }
 
 export class ConfigurationError extends Error {
@@ -55,6 +57,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const port = integer(env, 'PORT', 3000, issues);
   const databasePoolSize = integer(env, 'DATABASE_POOL_SIZE', 10, issues);
+  const authChallengeTtlSeconds = integer(env, 'AUTH_CHALLENGE_TTL_SECONDS', 300, issues);
+  const sessionTtlSeconds = integer(env, 'SESSION_TTL_SECONDS', 86_400, issues);
 
   if (issues.length > 0) {
     throw new ConfigurationError(issues);
@@ -66,6 +70,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel: logLevel as AppConfig['logLevel'],
     databaseUrl,
     databasePoolSize,
-    sessionSecret
+    sessionSecret,
+    authChallengeTtlSeconds,
+    sessionTtlSeconds
   };
 }

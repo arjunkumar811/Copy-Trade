@@ -3,11 +3,15 @@ import { loadConfig } from './config/env.js';
 import { createApp } from './api/app.js';
 import { createDatabase } from './db/pool.js';
 import { createLogger } from './infrastructure/logger.js';
+import { createDatabaseAuthStore } from './auth/store.js';
+import { createAuthService } from './auth/service.js';
+import { createSolanaSignatureVerifier } from './auth/crypto.js';
 
 const config = loadConfig();
 const logger = createLogger(config.logLevel);
 const database = createDatabase(config, logger);
-const app = createApp({ database, logger });
+const auth = createAuthService(config, createDatabaseAuthStore(database), createSolanaSignatureVerifier());
+const app = createApp({ database, logger, auth });
 const server = createServer((request, response) => {
   void app(request, response);
 });
