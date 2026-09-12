@@ -6,12 +6,15 @@ import { createLogger } from './infrastructure/logger.js';
 import { createDatabaseAuthStore } from './auth/store.js';
 import { createAuthService } from './auth/service.js';
 import { createSolanaSignatureVerifier } from './auth/crypto.js';
+import { createDatabaseFollowedTraderStore } from './traders/store.js';
+import { createFollowedTraderService } from './traders/service.js';
 
 const config = loadConfig();
 const logger = createLogger(config.logLevel);
 const database = createDatabase(config, logger);
 const auth = createAuthService(config, createDatabaseAuthStore(database), createSolanaSignatureVerifier());
-const app = createApp({ database, logger, auth });
+const traders = createFollowedTraderService(createDatabaseFollowedTraderStore(database));
+const app = createApp({ database, logger, auth, traders });
 const server = createServer((request, response) => {
   void app(request, response);
 });

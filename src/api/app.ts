@@ -4,11 +4,13 @@ import type { Database } from '../db/pool.js';
 import type { Logger } from '../infrastructure/logger.js';
 import { AppError } from './errors.js';
 import type { AuthService } from '../auth/types.js';
+import type { FollowedTraderService } from '../traders/types.js';
 
 export interface AppDependencies {
   database: Pick<Database, 'healthCheck'>;
   logger: Logger;
   auth?: AuthService;
+  traders?: FollowedTraderService;
   requestId?: () => string;
 }
 
@@ -43,6 +45,17 @@ function bearerToken(request: IncomingMessage): string {
   const header = request.headers.authorization;
   if (!header?.startsWith('Bearer ')) throw new AppError(401, 'UNAUTHORIZED', 'A bearer token is required');
   return header.slice(7).trim();
+}
+
+async function authenticatedUser(auth: AuthService | undefined, request: IncomingMessage) {
+  const user = await requiredAuth(auth).authenticate(bearerToken(request));
+  if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication is required');
+  return user;
+}
+
+function requiredTraders(traders: FollowedTraderService | undefined): FollowedTraderService {
+  if (!traders) throw new AppError(503, 'TRADER_SERVICE_UNAVAILABLE', 'Trader service is unavailable');
+  return traders;
 }
 
 export function createApp(dependencies: AppDependencies) {
@@ -89,9 +102,40 @@ export function createApp(dependencies: AppDependencies) {
 
       if (request.url === '/auth/me') {
         if (request.method !== 'GET') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only GET requests are supported');
-        const user = await requiredAuth(dependencies.auth).authenticate(bearerToken(request));
-        if (!user) throw new AppError(401, 'UNAUTHORIZED', 'Authentication is required');
+        const user = await authenticatedUser(dependencies.auth, request);
         sendJson(response, 200, user, requestId);
+        return;
+      }
+
+      if (request.url === '/followed-traders') {
+        const user = await authenticatedUser(dependencies.auth, request);
+        const traders = requiredTraders(dependencies.traders);
+        if (request.method === 'GET') {
+          sendJson(response, 200, { traders: await traders.list(user.userId) }, requestId);
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readJson(request);
+          sendJson(response, 201, await traders.follow(user.userId, body.traderWalletAddress as string), requestId);
+          return;
+        }
+        throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only GET and POST requests are supported');
+      }
+
+      const followedMatch = request.url?.match(/^\/followed-traders\/([^/]+)(?:\/settings)?$/);
+      if (followedMatch) {
+        const user = await authenticatedUser(dependencies.auth, request);
+        const traders = requiredTraders(dependencies.traders);
+        const followedTraderId = followedMatch[1];
+        if (!followedTraderId) throw new AppError(400, 'INVALID_ID', 'A followed trader ID is required');
+        if (request.url?.endsWith('/settings')) {
+          if (request.method !== 'PUT') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only PUT requests are supported');
+          sendJson(response, 200, await traders.updateSettings(user.userId, followedTraderId, await readJson(request)), requestId);
+          return;
+        }
+        if (request.method !== 'DELETE') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Only DELETE requests are supported');
+        await traders.remove(user.userId, followedTraderId);
+        sendJson(response, 204, null, requestId);
         return;
       }
 
