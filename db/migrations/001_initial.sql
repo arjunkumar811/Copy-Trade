@@ -1,0 +1,3 @@
+-- Phase 1 migration placeholder.
+-- Business tables are intentionally introduced in a later phase after the
+-- project foundation and technology choices are established.
