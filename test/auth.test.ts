@@ -21,7 +21,9 @@ const config: AppConfig = {
   databasePoolSize: 1,
   sessionSecret: 'test-secret',
   authChallengeTtlSeconds: 300,
-  sessionTtlSeconds: 3600
+  sessionTtlSeconds: 3600,
+  solanaRpcUrl: 'https://api.mainnet-beta.solana.com',
+  solanaWsUrl: 'wss://api.mainnet-beta.solana.com'
 };
 
 class MemoryAuthStore implements AuthStore {

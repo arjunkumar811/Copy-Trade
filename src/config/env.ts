@@ -7,6 +7,8 @@ export interface AppConfig {
   sessionSecret: string;
   authChallengeTtlSeconds: number;
   sessionTtlSeconds: number;
+  solanaRpcUrl: string;
+  solanaWsUrl: string;
 }
 
 export class ConfigurationError extends Error {
@@ -59,6 +61,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const databasePoolSize = integer(env, 'DATABASE_POOL_SIZE', 10, issues);
   const authChallengeTtlSeconds = integer(env, 'AUTH_CHALLENGE_TTL_SECONDS', 300, issues);
   const sessionTtlSeconds = integer(env, 'SESSION_TTL_SECONDS', 86_400, issues);
+  const solanaRpcUrl = requiredString(env, 'SOLANA_RPC_URL', issues);
+  const solanaWsUrl = requiredString(env, 'SOLANA_WS_URL', issues);
 
   if (issues.length > 0) {
     throw new ConfigurationError(issues);
@@ -72,6 +76,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     databasePoolSize,
     sessionSecret,
     authChallengeTtlSeconds,
-    sessionTtlSeconds
+    sessionTtlSeconds,
+    solanaRpcUrl,
+    solanaWsUrl
   };
 }

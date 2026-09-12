@@ -12,7 +12,9 @@ const validEnv = {
   LOG_LEVEL: 'info',
   DATABASE_URL: 'postgresql://user:password@localhost:5432/test',
   DATABASE_POOL_SIZE: '5',
-  SESSION_SECRET: 'test-secret'
+  SESSION_SECRET: 'test-secret',
+  SOLANA_RPC_URL: 'https://api.mainnet-beta.solana.com',
+  SOLANA_WS_URL: 'wss://api.mainnet-beta.solana.com'
 };
 
 function createTestServer(healthCheck: () => Promise<void>) {
