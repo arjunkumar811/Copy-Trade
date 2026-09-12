@@ -94,6 +94,59 @@ test('graceful shutdown waits for active work', async () => {
   assert.equal(finished, true);
 });
 
+test('worker survives a transient queue claim failure', async () => {
+  const base = createMemoryJobQueue();
+  let claimCalls = 0;
+  const queue = {
+    ...base,
+    claim: async (workerId: string, limit: number) => {
+      claimCalls += 1;
+      if (claimCalls === 1) throw new Error('queue temporarily unavailable');
+      return base.claim(workerId, limit);
+    }
+  };
+  await queue.enqueue(JOB_TYPES.TRADE_DETECTION, 'claim-retry-1', {});
+  let handled = false;
+  const worker = createQueueWorker(queue, { [JOB_TYPES.TRADE_DETECTION]: async () => { handled = true; } }, logger, { workerId: 'worker-claim-retry', pollIntervalMs: 1 });
+  await worker.start();
+  await wait(20);
+  await worker.stop();
+  assert.equal(handled, true);
+  assert.ok(claimCalls >= 2);
+});
+
+test('worker survives a queue failure while recording a failed job', async () => {
+  const base = createMemoryJobQueue(5);
+  let failCalls = 0;
+  const queue = {
+    ...base,
+    fail: async (jobId: string, workerId: string, error: Error, retryDelayMs: number) => {
+      failCalls += 1;
+      if (failCalls === 1) throw new Error('queue write temporarily unavailable');
+      return base.fail(jobId, workerId, error, retryDelayMs);
+    }
+  };
+  const job = await queue.enqueue(JOB_TYPES.TRADE_DETECTION, 'fail-record-1', {}, { maxAttempts: 2 });
+  const worker = createQueueWorker(queue, { [JOB_TYPES.TRADE_DETECTION]: async () => { throw new Error('handler failed'); } }, logger, { workerId: 'worker-fail-record', pollIntervalMs: 1, retryBaseDelayMs: 1 });
+  await worker.start();
+  await wait(60);
+  await worker.stop();
+  assert.equal(failCalls, 1);
+  assert.equal(queue.jobs.get(job.id)?.status, 'processing');
+});
+
+test('renews leases during long-running handlers', async () => {
+  const queue = createMemoryJobQueue(5);
+  const job = await queue.enqueue(JOB_TYPES.TRADE_DETECTION, 'lease-renew-1', {});
+  let handled = false;
+  const worker = createQueueWorker(queue, { [JOB_TYPES.TRADE_DETECTION]: async () => { await wait(20); handled = true; } }, logger, { workerId: 'worker-lease', pollIntervalMs: 1, leaseRenewalIntervalMs: 1 });
+  await worker.start();
+  await wait(30);
+  await worker.stop();
+  assert.equal(handled, true);
+  assert.equal(queue.jobs.get(job.id)?.status, 'completed');
+});
+
 test('adapts source transactions to idempotent processing jobs', async () => {
   const queue = createMemoryJobQueue();
   const sourceQueue = createSourceTransactionQueue(queue);

@@ -7,6 +7,7 @@ export interface WorkerOptions {
   pollIntervalMs?: number;
   retryBaseDelayMs?: number;
   retryMaxDelayMs?: number;
+  leaseRenewalIntervalMs?: number;
   sleep?: (delayMs: number) => Promise<void>;
 }
 
@@ -17,12 +18,18 @@ export function createQueueWorker(queue: JobQueue, handlers: Partial<Record<Queu
   const pollIntervalMs = options.pollIntervalMs ?? 100;
   const retryBaseDelayMs = options.retryBaseDelayMs ?? 250;
   const retryMaxDelayMs = options.retryMaxDelayMs ?? 30_000;
+  const leaseRenewalIntervalMs = options.leaseRenewalIntervalMs ?? 20_000;
   const sleep = options.sleep ?? defaultSleep;
   let running = false;
   let loopPromise: Promise<void> | undefined;
   const active = new Set<Promise<void>>();
 
   const process = async (job: QueueJob): Promise<void> => {
+    const renewal = setInterval(() => {
+      void queue.renew(job.id, options.workerId).catch((error: unknown) => {
+        logger.error('Queue job lease renewal failed', { jobId: job.id, workerId: options.workerId, error: error instanceof Error ? error.message : 'unknown' });
+      });
+    }, leaseRenewalIntervalMs);
     try {
       const handler = handlers[job.type];
       if (!handler) throw new Error(`No handler registered for ${job.type}`);
@@ -32,8 +39,14 @@ export function createQueueWorker(queue: JobQueue, handlers: Partial<Record<Queu
     } catch (error) {
       const failure = error instanceof Error ? error : new Error('Unknown job failure');
       const delay = Math.min(retryMaxDelayMs, retryBaseDelayMs * (2 ** Math.min(job.attempts - 1, 10)));
-      const disposition = await queue.fail(job.id, options.workerId, failure, delay);
-      logger.error('Queue job failed', { jobId: job.id, jobType: job.type, workerId: options.workerId, disposition, error: failure.message });
+      try {
+        const disposition = await queue.fail(job.id, options.workerId, failure, delay);
+        logger.error('Queue job failed', { jobId: job.id, jobType: job.type, workerId: options.workerId, disposition, error: failure.message });
+      } catch (queueError) {
+        logger.error('Unable to record queue job failure', { jobId: job.id, jobType: job.type, workerId: options.workerId, error: queueError instanceof Error ? queueError.message : 'unknown' });
+      }
+    } finally {
+      clearInterval(renewal);
     }
   };
 
@@ -41,10 +54,15 @@ export function createQueueWorker(queue: JobQueue, handlers: Partial<Record<Queu
     while (running) {
       const available = Math.max(0, concurrency - active.size);
       if (available > 0) {
-        const jobs = await queue.claim(options.workerId, available);
-        for (const job of jobs) {
-          const task = process(job).finally(() => active.delete(task));
-          active.add(task);
+        try {
+          const jobs = await queue.claim(options.workerId, available);
+          for (const job of jobs) {
+            const task = process(job).finally(() => active.delete(task));
+            active.add(task);
+          }
+        } catch (error) {
+          logger.error('Queue claim failed', { workerId: options.workerId, error: error instanceof Error ? error.message : 'unknown' });
+          if (running) await sleep(pollIntervalMs);
         }
       }
       if (active.size === 0 && running) await sleep(pollIntervalMs);

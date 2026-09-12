@@ -37,6 +37,12 @@ export function createMemoryJobQueue(leaseMs = 60_000): JobQueue & { jobs: Map<s
         return job;
       });
     },
+    async renew(jobId: string, workerId: string): Promise<boolean> {
+      const job = jobs.get(jobId);
+      if (!job || job.status !== 'processing' || job.lockedBy !== workerId) return false;
+      job.availableAt = new Date();
+      return true;
+    },
     async acknowledge(jobId: string, workerId: string): Promise<void> {
       const job = jobs.get(jobId);
       if (job?.status === 'processing' && job.lockedBy === workerId) {

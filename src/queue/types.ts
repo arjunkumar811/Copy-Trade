@@ -27,6 +27,7 @@ export interface EnqueueOptions {
 export interface JobQueue {
   enqueue<T>(type: JobType, idempotencyKey: string, payload: T, options?: EnqueueOptions): Promise<QueueJob<T>>;
   claim(workerId: string, limit: number): Promise<QueueJob[]>;
+  renew(jobId: string, workerId: string): Promise<boolean>;
   acknowledge(jobId: string, workerId: string): Promise<void>;
   fail(jobId: string, workerId: string, error: Error, retryDelayMs: number): Promise<'retry' | 'dead-letter'>;
   close(): Promise<void>;

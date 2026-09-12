@@ -67,6 +67,15 @@ export function createDatabaseJobQueue(database: Database, leaseSeconds = 60): J
       ) as QueryResult<JobRow>;
       return result.rows.map(mapJob);
     },
+    async renew(jobId: string, workerId: string): Promise<boolean> {
+      const result = await database.query(
+        `UPDATE queue_jobs SET locked_at = now(), updated_at = now()
+         WHERE id = $1 AND status = 'processing' AND locked_by = $2
+         RETURNING id`,
+        [jobId, workerId]
+      ) as QueryResult<{ id: string }>;
+      return result.rows.length > 0;
+    },
     async acknowledge(jobId: string, workerId: string): Promise<void> {
       await database.query(
         `UPDATE queue_jobs SET status = 'completed', locked_at = NULL, locked_by = NULL, updated_at = now()
