@@ -3,9 +3,14 @@ import type { AppConfig } from '../config/env.js';
 import type { Logger } from '../infrastructure/logger.js';
 
 export interface Database {
-  query(text: string): Promise<unknown>;
+  query(text: string, values?: readonly unknown[]): Promise<unknown>;
+  transaction<T>(callback: (client: DatabaseClient) => Promise<T>): Promise<T>;
   healthCheck(): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface DatabaseClient {
+  query(text: string, values?: readonly unknown[]): Promise<unknown>;
 }
 
 export function createDatabase(config: AppConfig, logger: Logger): Database {
@@ -18,8 +23,22 @@ export function createDatabase(config: AppConfig, logger: Logger): Database {
   pool.on('error', (error) => logger.error('Unexpected database pool error', { error: error.message }));
 
   return {
-    async query(text: string): Promise<unknown> {
-      return pool.query(text);
+    async query(text: string, values?: readonly unknown[]): Promise<unknown> {
+      return pool.query(text, values as unknown[] | undefined);
+    },
+    async transaction<T>(callback: (client: DatabaseClient) => Promise<T>): Promise<T> {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await callback({ query: (text, values) => client.query(text, values as unknown[] | undefined) });
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
     },
     async healthCheck(): Promise<void> {
       await pool.query('SELECT 1');

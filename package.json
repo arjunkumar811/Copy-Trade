@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test test/**/*.test.ts",
     "lint": "eslint . --ext .ts",
+    "migrate": "tsx src/db/run-migrations.ts",
     "start": "node dist/src/server.js"
   },
   "dependencies": {
